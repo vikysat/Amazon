@@ -1,0 +1,9 @@
+__MACOSX/
+student_resource/dataset/
+*.DS_Store
+.venv/
+cache/
+__pycache__/
+*.parquet
+New folder/
+cache_eda.txt
