@@ -48,7 +48,7 @@ _VIRAMA = "्"
 _EXTRA = {"ஃ": "", "‌": "", "‍": ""}
 # Malayalam "chillu" letters live outside the aligned range: map to Devanagari cons+virama.
 _CHILLU = {"ൺ": "ण्", "ൻ": "न्", "ർ": "र्", "ൽ": "ल्", "ൾ": "ळ्", "ൿ": "क्",
-           "ൔ": "म्", "ൕ": "य्", "ൖ": "ळ्"}
+           "ൔ": "म्", "ൕ": "य्", "ൖ": "ळ्", "ੰ": "ं", "ੱ": ""}
 _DEVA_DIGITS = {chr(0x0966 + i): str(i) for i in range(10)}
 
 
@@ -158,6 +158,7 @@ STREET_CANON = {
     "village": "vill", "vill": "vill", "post": "po", "po": "po", "opposite": "opp", "opp": "opp",
     "near": "near", "nr": "near", "behind": "behind", "bh": "behind", "beside": "near",
     "ground": "gf", "gf": "gf", "first": "1", "second": "2", "third": "3", "fourth": "4",
+    "fifth": "5", "sixth": "6", "seventh": "7", "eighth": "8", "ninth": "9", "tenth": "10",
     # France
     "rue": "rue", "r": "rue", "avenue.": "ave", "chemin": "chemin", "ch": "chemin", "che": "chemin",
     "allee": "allee", "all": "allee", "alle": "allee", "impasse": "imp", "imp": "imp",
@@ -198,6 +199,10 @@ REGION_CANON = {
     "ile de france": "idf", "grand est": "ges", "normandie": "nor", "bretagne": "bre",
     "occitanie": "occ", "provence alpes cote d azur": "pac", "auvergne rhone alpes": "ara",
     "bourgogne franche comte": "bfc", "centre val de loire": "cvl", "corse": "cor",
+    # transliterated native-script state names
+    "maharashtr": "mh", "dilli": "dl", "karnatak": "ka", "tamilnatu": "tn", "pashchimabang": "wb",
+    "telangan": "tg", "hariyana": "hr", "keralan": "kl", "madhy pradesh": "mp", "andhrapradesh": "ap",
+    "panjab": "pb", "tamilnadu": "tn",
 }
 _REGION_RE = re.compile(r"\b(" + "|".join(sorted(map(re.escape, REGION_CANON), key=len, reverse=True)) + r")\b")
 
@@ -264,12 +269,28 @@ def skeleton(tok: str) -> str:
     return s
 
 
+_LEET = str.maketrans("013457", "oleast")
+
+
+def _deleet(tok: str) -> str:
+    """Undo leetspeak typos in mixed alnum name tokens ("pr0jects" -> "projects").
+
+    Tokens that are pure digits, or start with a digit run followed by a short
+    alphabetic suffix (like "7a", "2nd"), are left untouched.
+    """
+    if tok.isdigit() or tok.isalpha():
+        return tok
+    if re.fullmatch(r"\d+[a-z]{0,2}", tok):
+        return tok
+    return tok.translate(_LEET)
+
+
 def normalize_name(raw: str) -> tuple[str, str, str, str]:
     """Return (name_norm, name_core, name_legal, name_skel) for a raw business name."""
     s = basic_clean(raw)
     s = DBA_RE.sub(" ", s)
     s = re.sub(r"\.com\b|\.net\b|\.org\b|\bwww\.", " ", s)
-    toks = collapse_initials(TOKEN_RE.findall(s))
+    toks = collapse_initials([_deleet(t) for t in TOKEN_RE.findall(s)])
     norm, core, legal = [], [], []
     for t in toks:
         c = LEGAL_CANON.get(t)
@@ -315,6 +336,8 @@ def normalize_address(raw: str) -> tuple[str, str, str, str, str]:
         for t in TOKEN_RE.findall(text):
             if t in NULL_TOKENS:
                 continue
+            if t.isdigit():
+                t = t.lstrip("0") or "0"
             out.append(STREET_CANON.get(t, t))
         return out
 
