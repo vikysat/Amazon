@@ -98,3 +98,16 @@ Row counts:
   without one-to-one 0.7283. Cross-country (threshold from one country): US->India 0.7166, India->US 0.7308.
 - Test output: 7.94M matches, 17.6k empty rows; validator PASS. Copied to submissions/phase4_baseline_0.7335/.
 - Train features: 25.7M pairs x 44 features in ~80 min (10 procs, concurrent with test blocking).
+- **Leaderboard: 0.645** (public) vs 0.7335 on train -> systematic shift, not noise. Test has
+  ~5.75 pool records per S1 vs 4.68 in train (34.5 vs 28 raw candidates/S1) -> likely more
+  singletons / unowned distractors; baseline has singleton acc 0.10, so it is hit hard. France unseen.
+  -> building a test-like proxy validation (src/proxy_val.py) to calibrate decoding.
+
+## Phase 5 — stage-1 LightGBM (src/model.py)
+- 44 pairwise features + blocker cos/rank + source flag; LightGBM binary (lr 0.1, 127 leaves,
+  min_data_in_leaf 200, feature/bagging fraction 0.8, lambda_l2 10, max_bin 127), early stopping
+  on a 10% inner split, max 800 rounds (all folds hit ~800 -> more rounds could still help).
+- 5-fold GroupKFold over S1; each fold trains on a 30% sample of its training S1 entities (~6.2M rows).
+- **Stage-1 OOF F0.5 = 0.9691** (one-to-one + threshold 0.675; singleton acc 0.964, non-singleton
+  0.969). Without one-to-one: 0.9686 (t=0.70). Expected-F decoding: 0.9686 (singleton acc 0.946).
+- Runtime: ~6-12 min per fold on this laptop (paging: 25.7M x 57 float32 matrix = 5.9 GB).

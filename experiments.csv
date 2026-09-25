@@ -1,2 +1,3 @@
 timestamp,git_hash,description,blocking_recall,cands_per_s1,oof_f05,singleton_acc,nonsingleton_f05,cross_country_f05
 2026-09-25 23:40:08,66dd3eb,"phase4 baseline mean(n_tset,a_tset) o2o+threshold",0.95986,11.65956,0.73352,0.09988,0.77100,0.72371
+2026-09-26 02:59:52,c524f5a,"stage1+2 LGBM, decode=o2o_expF, frac=0.3",0.95986,11.65956,0.97348,0.97757,0.97324,0.90069
