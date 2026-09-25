@@ -1,9 +1,11 @@
 # NOTES — Business Entity Resolution (Amazon ML Challenge 2026)
 
 ## Status (keep updated)
-- **Current phase:** Phase 4 done (baseline submitted-ready) → Phase 5/6 (LightGBM stage 1+2)
-- **Best OOF F0.5:** 0.7335 (Phase 4 baseline; submissions/phase4_baseline_0.7335, validator PASS)
-- **Next step:** `run_pipeline.py --mode model` (stage-1 + stage-2 LightGBM, decoding on OOF)
+- **Current phase:** 5/6/8/9 done; Phase 10 docs written; reproducibility re-run (fresh clone) in progress
+- **Best OOF F0.5:** 0.9735 (stage-2 LightGBM + one-to-one + expected-F) -> submissions/phase6_stage2_0.9735
+  (validator PASS). Leaderboard: baseline 0.645; model [pending user submission].
+- **Next step:** get model LB score; then optional full rebuild with France fixes (notes_france.md) and
+  more boosting rounds / larger training fraction.
 
 ## Environment
 - Hardware: Intel i7-13620H (10 cores / 16 threads), 15.7 GB RAM (often only ~4-8 GB free), no GPU (Intel UHD). Windows 11.
@@ -111,3 +113,33 @@ Row counts:
 - **Stage-1 OOF F0.5 = 0.9691** (one-to-one + threshold 0.675; singleton acc 0.964, non-singleton
   0.969). Without one-to-one: 0.9686 (t=0.70). Expected-F decoding: 0.9686 (singleton acc 0.946).
 - Runtime: ~6-12 min per fold on this laptop (paging: 25.7M x 57 float32 matrix = 5.9 GB).
+
+## Phase 6 — stage-2 relational LightGBM
+- Relational features from OOF stage-1 probs (c_rank, c_n, c_is_best, c_margin, c_other_best, s_rank,
+  s_max, s_gap, s_n05, s_sum, s_n, s_sum_best, p1). Early stopping at 257-398 rounds.
+- **Stage-2 OOF F0.5 = 0.9735** (o2o + expected-F; singleton 0.978, non-singleton 0.973);
+  global threshold 0.70: 0.9732 (singleton 0.987). Gain over stage 1: +0.0044.
+- Gain importance: stage 1 — r_p 48%, a_tset 13%, num_only2 9%; stage 2 — c_margin 69%, p1 29%.
+- **Cross-country** (stage 1+2 trained on one country, threshold from its OOF): US->India 0.850,
+  India->US 0.952 (mean 0.901). US->India loss: Indic scripts / landmark addresses absent from US.
+- Test: 5.63M matches (baseline 7.94M); predicted-count distribution per country nearly identical
+  (empty: France 5.9%, India 6.1%, US 5.9%).
+
+## Phase 8 — decoding / proxy validation (src/decode.py, src/proxy_val.py, src/run_proxy.py)
+- one-to-one helps slightly for threshold decoding; expected-F (MC 500 samples, k<=10) best on OOF.
+- Label-free composition comparison train vs test (cache/proxy.log): US/India test ~ train (slightly
+  more candidates/S1, no extra weak-best S1s). Injecting singletons or removing S1s only increases the
+  distance to test -> best proxy = unmodified train, so OOF is a fair guide for US/India.
+- **France is the outlier:** 24 cands/S1 and 4.4 competing S1s per candidate (US/India ~2.3-2.6) ->
+  very generic names. Explains the baseline LB drop (implied France F ~0.15 for the baseline).
+
+## Phase 9 — France robustness
+- See notes_france.md: normaliser handles legal forms / street types / accents; gaps: départements not
+  mapped to regions, EI/Ets/Cie legal forms. Manual inspection of French predictions: correct.
+- No code path depends on country values (country only partitions blocking; validation code aside).
+  No country-derived features exist, so the Phase-9 ablation is moot.
+
+## Phase 10 — final build (in progress)
+- Documentation_template.md and README filled. Reproducibility: fresh `git clone` into
+  ../repro_clone, caches for normalisation/blocking/features hardlinked, model stage re-run from the
+  entrypoint; outputs to be diffed against output_model/.
