@@ -1,0 +1,2 @@
+timestamp,git_hash,description,blocking_recall,cands_per_s1,oof_f05,singleton_acc,nonsingleton_f05,cross_country_f05
+2026-09-25 23:40:08,66dd3eb,"phase4 baseline mean(n_tset,a_tset) o2o+threshold",0.95986,11.65956,0.73352,0.09988,0.77100,0.72371

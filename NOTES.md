@@ -1,9 +1,9 @@
 # NOTES — Business Entity Resolution (Amazon ML Challenge 2026)
 
 ## Status (keep updated)
-- **Current phase:** 0/1 done → Phase 2–4 in progress (normalisation, blocking, baseline)
-- **Best OOF F0.5:** n/a yet
-- **Next step:** blocking + baseline submission
+- **Current phase:** Phase 4 done (baseline submitted-ready) → Phase 5/6 (LightGBM stage 1+2)
+- **Best OOF F0.5:** 0.7335 (Phase 4 baseline; submissions/phase4_baseline_0.7335, validator PASS)
+- **Next step:** `run_pipeline.py --mode model` (stage-1 + stage-2 LightGBM, decoding on OOF)
 
 ## Environment
 - Hardware: Intel i7-13620H (10 cores / 16 threads), 15.7 GB RAM (often only ~4-8 GB free), no GPU (Intel UHD). Windows 11.
@@ -82,3 +82,19 @@ Row counts:
   - char 4-grams add +1.5-2pp recall (typos, concatenated names like "federalcenter.com").
 - Residual misses: generic names + empty/truncated address (many S1s with the same name),
   gibberish replacement names with truncated addresses, script-switched names with address edits.
+
+### Phase 3 full-scale result
+- Train: pool->S1 top-6 = 61.9M pairs (28/S1), pair recall 96.8%. Test: 59.8M pairs (34.5/S1).
+- Runtime: train ~2h20m, test ~1h45m (16 threads; Windows EcoQoS throttled background workers to
+  ~20% until process priority was raised to AboveNormal).
+- Final candidate filter (stages.FILTER): keep pool->S1 rank <= 1 OR cosine >= 0.4
+  -> train 25.7M pairs (11.66/S1), **pair recall 96.0%**, per-entity recall mean 96.0%, 88.3% of
+  entities have all true matches in candidates, reduction ratio 0.999999. Test: 26.2M pairs.
+  (grid: rank0|cos>=.4: 8.5/S1 95.4%; rank<=2|cos>=.4: 15.4/S1 96.3%).
+
+## Phase 4 — baseline (safety net)
+- score = mean(token_set(name_core), token_set(addr_norm)) / 100, one-to-one assignment, global threshold.
+- Train (no fitting except threshold) F0.5 = **0.7335** at t=0.80 (singleton acc 0.10, non-singleton 0.771);
+  without one-to-one 0.7283. Cross-country (threshold from one country): US->India 0.7166, India->US 0.7308.
+- Test output: 7.94M matches, 17.6k empty rows; validator PASS. Copied to submissions/phase4_baseline_0.7335/.
+- Train features: 25.7M pairs x 44 features in ~80 min (10 procs, concurrent with test blocking).
