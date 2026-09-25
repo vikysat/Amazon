@@ -115,36 +115,48 @@ def _worker(args):
     return _pair_feats(a, b, n)
 
 
-def name_idf(s1: pd.DataFrame, pool: pd.DataFrame) -> dict:
-    """IDF of name_core tokens over S1 + pool (unsupervised; fine on test data)."""
-    toks = pd.concat([s1["name_core"], pool["name_core"]], ignore_index=True).astype(str).str.split()
-    ex = toks.explode()
-    ex = ex[ex.notna() & (ex != "")]
-    vc = ex.value_counts()
-    n_docs = len(toks)
-    idf = np.log((n_docs + 1) / (vc.to_numpy() + 1)) + 1
-    d = dict(zip(vc.index.astype(str), idf.astype(float)))
+def name_idf(s1, pool) -> dict:
+    """IDF of name_core tokens over S1 + pool (unsupervised; fine on test data).
+
+    Accepts pyarrow Tables; tokens are counted with a Counter over one column at a time.
+    """
+    from collections import Counter
+
+    cnt = Counter()
+    n_docs = 0
+    for t in (s1, pool):
+        col = t.column("name_core")
+        for batch in col.chunks:
+            for name in batch.to_pylist():
+                n_docs += 1
+                if name:
+                    cnt.update(set(name.split()))
+    d = {tok: float(np.log((n_docs + 1) / (c + 1)) + 1) for tok, c in cnt.items()}
     d["__max__"] = float(np.log(n_docs + 1) + 1)
     return d
 
 
-def compute_features(pairs: pd.DataFrame, s1: pd.DataFrame, pool: pd.DataFrame, idf: dict,
+def compute_features(pairs: pd.DataFrame, s1, pool, idf: dict,
                      n_jobs: int = 12, chunk: int = 20000) -> pd.DataFrame:
     """Compute FEATURES for every row of ``pairs`` (columns i1, ip) and return a DataFrame.
 
-    Blocker-derived columns (cos, r_p, r_s) and the source flag are appended as-is.
+    ``s1`` / ``pool`` are pyarrow Tables (memory-lean); strings are gathered per chunk with
+    ``Table.take`` so only one chunk of Python strings exists at a time. Blocker-derived columns
+    (cos, r_p, r_s) and the source flag are appended as-is.
     """
-    c1 = {c: s1[c].astype(str).to_numpy(dtype=object) for c in STR_COLS}
-    cp = {c: pool[c].astype(str).to_numpy(dtype=object) for c in STR_COLS}
     i1 = pairs["i1"].to_numpy()
     ip = pairs["ip"].to_numpy()
+    s1 = s1.select(STR_COLS)
+    pool_ids = pool.column("entity_id")
+    poolt = pool.select(STR_COLS)
 
     def gen():
         """Yield per-chunk string dicts for the workers."""
         for st in range(0, len(pairs), chunk):
             a_idx, b_idx = i1[st:st + chunk], ip[st:st + chunk]
-            yield ({c: c1[c][a_idx].tolist() for c in STR_COLS},
-                   {c: cp[c][b_idx].tolist() for c in STR_COLS}, len(a_idx))
+            ta, tb = s1.take(a_idx), poolt.take(b_idx)
+            yield ({c: ta.column(c).to_pylist() for c in STR_COLS},
+                   {c: tb.column(c).to_pylist() for c in STR_COLS}, len(a_idx))
 
     parts = []
     with Pool(n_jobs, initializer=_init, initargs=(idf,)) as pool_:
@@ -155,5 +167,6 @@ def compute_features(pairs: pd.DataFrame, s1: pd.DataFrame, pool: pd.DataFrame, 
     X = pd.DataFrame(np.concatenate(parts), columns=FEATURES)
     for c in ("cos", "r_p", "r_s"):
         X[c] = pairs[c].to_numpy()
-    X["is_s3"] = pool["entity_id"].astype(str).str.startswith("S3").to_numpy()[ip].astype(np.int8)
+    is_s3 = np.array([str(x).startswith("S3") for x in pool_ids.to_pylist()], dtype=np.int8)
+    X["is_s3"] = is_s3[ip]
     return X

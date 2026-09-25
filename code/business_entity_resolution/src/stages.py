@@ -10,11 +10,11 @@ import numpy as np
 import pandas as pd
 
 from blocking import tfidf_block
-from features import compute_features, name_idf
+from features import STR_COLS, compute_features, name_idf
 from io_utils import gt_pairs, log
 from prepare import load_prepared, prepare
 
-BLOCK_PARAMS = dict(k_pool=3, k_s1=10, df_cap=1000, char_n=4)
+BLOCK_PARAMS = dict(k_pool=6, k_s1=0, df_cap=1000, char_n=4)
 
 
 def load_tables(cache_dir, split: str, columns=None):
@@ -94,7 +94,14 @@ def stage_features(cache_dir, split: str, pairs: pd.DataFrame, tag: str = "v1", 
     if out.exists():
         return None if lazy else pd.read_parquet(out)
     out.parent.mkdir(parents=True, exist_ok=True)
-    s1, pool = load_tables(cache_dir, split)
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+
+    from prepare import prepared_path
+
+    cols = ["entity_id"] + STR_COLS
+    s1 = pq.read_table(prepared_path(cache_dir, split, "s1"), columns=cols)
+    pool = pa.concat_tables([pq.read_table(prepared_path(cache_dir, split, s), columns=cols) for s in ("s2", "s3")])
     log(f"features {split}: {len(pairs):,} pairs")
     idf = name_idf(s1, pool)
     X = compute_features(pairs, s1, pool, idf, n_jobs=n_jobs)
@@ -106,7 +113,7 @@ def stage_features(cache_dir, split: str, pairs: pd.DataFrame, tag: str = "v1", 
 # Final candidate filter applied after blocking (tuned on train recall vs. size).
 # A pair is kept if ANY rule fires. The kept set is exactly what the model scores and what
 # candidate_pairs.tsv contains.
-FILTER = dict(rp_max=0, rs_max=4, cos_min=0.35)
+FILTER = dict(rp_max=1, rs_max=-1, cos_min=0.4)
 
 
 def stage_filter(pairs: pd.DataFrame, rule: dict | None = None) -> pd.DataFrame:

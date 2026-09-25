@@ -104,8 +104,10 @@ def sparse_topk(query: sp.csr_matrix, index: sp.csr_matrix, k: int, n_jobs: int 
     tasks = [(query[i:i + chunk], k, i) for i in range(0, query.shape[0], chunk)]
     out = []
     with Pool(n_jobs, initializer=_init_worker, initargs=(tmp, shape)) as pool:
-        for res in pool.imap(_query_chunk, tasks, chunksize=4):
+        for j, res in enumerate(pool.imap(_query_chunk, tasks, chunksize=4)):
             out.append(res)
+            if j % 250 == 0:
+                log(f"      topk chunk {j}/{len(tasks)}")
     for f in ("data.npy", "indices.npy", "indptr.npy"):
         try:
             os.remove(os.path.join(tmp, f))
@@ -143,10 +145,14 @@ def tfidf_block(s1: pd.DataFrame, pool: pd.DataFrame, k_pool: int = 3, k_s1: int
         qr, ir, sc, rk = sparse_topk(xp, x1, k_pool, n_jobs=n_jobs)
         a = pd.DataFrame({"i1": i1[ir], "ip": ip[qr], "cos_p": sc, "r_p": rk})
         log(f"    pool->s1 pairs={len(a):,}")
-        qr, ir, sc, rk = sparse_topk(x1, xp, k_s1, n_jobs=n_jobs)
-        b = pd.DataFrame({"i1": i1[qr], "ip": ip[ir], "cos_s": sc, "r_s": rk})
-        log(f"    s1->pool pairs={len(b):,}")
-        m = a.merge(b, on=["i1", "ip"], how="outer")
+        if k_s1 > 0:
+            qr, ir, sc, rk = sparse_topk(x1, xp, k_s1, n_jobs=n_jobs)
+            b = pd.DataFrame({"i1": i1[qr], "ip": ip[ir], "cos_s": sc, "r_s": rk})
+            log(f"    s1->pool pairs={len(b):,}")
+            m = a.merge(b, on=["i1", "ip"], how="outer")
+        else:  # pool->S1 only (cheaper; nearly the same recall at equal candidate budget)
+            b = None
+            m = a.assign(cos_s=np.nan, r_s=-1)
         m["cos"] = m["cos_p"].fillna(m["cos_s"]).astype(np.float32)
         m["r_p"] = m["r_p"].fillna(-1).astype(np.int16)
         m["r_s"] = m["r_s"].fillna(-1).astype(np.int16)

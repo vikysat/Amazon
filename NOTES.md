@@ -53,3 +53,32 @@ Row counts:
 
 ## Phase 1 — metric
 - `src/metrics.py`: vectorised macro F0.5 on pair tables; self-test passes (worked example = 0.7143).
+
+## Phase 2 — normalisation (src/normalize.py, src/prepare.py)
+- NFKD + accent strip + lowercase, & / + -> "and", initials collapse ("l l c" -> llc, "s a s" -> sas).
+- **Indic transliteration** (hand-written table): all Indic blocks are mapped to Devanagari by
+  Unicode offset, then one Devanagari->Latin table with schwa handling (+ Malayalam chillus,
+  Gurmukhi tippi). "डिजिटल इंफोटेक प्राइवेट लिमिटेड" -> "dijital inphotek pvt ltd".
+- **Phonetic skeleton** of name tokens (name_skel): consonant skeleton with ph/f/p, v/w/b, g/j,
+  c/k/q merges -> English and transliterated spellings coincide ("digital infotech" and
+  "dijital inphotek" -> "djtl inptk"). Transliterated legal words detected by skeleton.
+- Legal forms (US/IN/FR incl. SARL, SAS, SASU, SA, EURL, SCI, societe), street types (US/IN/FR incl.
+  rue/r, bd/bld, av, chemin, allee, imp, rte), US states / Indian states / French regions canonicalised
+  to short codes, ordinal words -> digits, leading zeros stripped from numbers, leetspeak undone in
+  mixed alnum name tokens ("pr0jects", "5terling").
+- Fields: name_norm, name_core, name_legal, name_skel, addr_norm, addr_no_landmark, addr_numbers,
+  postcode (regex 5/6 digits, no country gating), city (best effort). Raw strings kept.
+- Runtime: ~25 min for all 22M records with 12 processes.
+
+## Phase 3 — blocking (src/blocking.py)
+- Sparse TF-IDF (sublinear tf, L2) over a token bag: name-skeleton unigrams+bigrams, address
+  unigrams+bigrams, char 4-grams of space-free name core; tokens with df > 1000 dropped from the
+  product (speed; they carry little IDF weight). Always within the same country string.
+- Word unigrams alone were ~10x slower and weaker; bigrams make the product sparse & fast.
+- Sample study (20k S1 / their true pool records):
+  - pool->S1 top-3: India 93.8% / US 97.4%; +S1->pool top-10: 94.9% / 98.2%.
+  - pool->S1 top-5 alone: India 94.6% / US 97.9% at the same candidate budget -> S1->pool direction
+    (4.7x bigger index, ~40 min/country) dropped; using pool->S1 top-6.
+  - char 4-grams add +1.5-2pp recall (typos, concatenated names like "federalcenter.com").
+- Residual misses: generic names + empty/truncated address (many S1s with the same name),
+  gibberish replacement names with truncated addresses, script-switched names with address edits.
