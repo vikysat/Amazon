@@ -143,3 +143,7 @@ Row counts:
 - Documentation_template.md and README filled. Reproducibility: fresh `git clone` into
   ../repro_clone, caches for normalisation/blocking/features hardlinked, model stage re-run from the
   entrypoint; outputs to be diffed against output_model/.
+- Reproducibility (fresh clone c524f5a..2b2ce44 code, entrypoint `--mode model`): stage-1 5-fold OOF
+  predictions (25.7M) are **bit-identical** to the main run (max abs diff 0.0; best iterations
+  800/800/799/800/798 identical). The run was then stopped by the host for low system memory during
+  stage 2 (not a pipeline error); remaining stages not yet re-verified.
