@@ -25,11 +25,11 @@ from prepare import load_prepared
 from stages import blocking_report, feats_path, label_pairs, stage_block, stage_features, stage_filter
 
 N_FOLDS = 5
-PARAMS = dict(objective="binary", learning_rate=0.08, num_leaves=127, min_data_in_leaf=200,
+PARAMS = dict(objective="binary", learning_rate=0.1, num_leaves=127, min_data_in_leaf=200,
               feature_fraction=0.8, bagging_fraction=0.8, bagging_freq=1, lambda_l2=10.0,
               max_bin=127, verbose=-1, seed=SEED, num_threads=12, deterministic=True,
               force_row_wise=True)
-MAX_ROUNDS = 600
+MAX_ROUNDS = 800
 REL_COLS = ["c_rank", "c_n", "c_is_best", "c_margin", "c_other_best", "s_rank", "s_max", "s_gap",
             "s_n05", "s_sum", "s_n", "s_sum_best", "p1"]
 
@@ -124,8 +124,17 @@ def _train(ds_full: lgb.Dataset, tr_idx: np.ndarray, rng: np.random.Generator, r
 
 
 def cv_oof(X: np.ndarray, y: np.ndarray, groups_fold: np.ndarray, train_frac: float, i1: np.ndarray,
-           name: str, feat_names) -> tuple[np.ndarray, list[int]]:
-    """5-fold OOF predictions. Each fold trains on a ``train_frac`` sample of its training S1s."""
+           name: str, feat_names, cache_dir=None) -> tuple[np.ndarray, list[int]]:
+    """5-fold OOF predictions. Each fold trains on a ``train_frac`` sample of its training S1s.
+
+    If ``cache_dir`` is given, OOF predictions and best iterations are cached there
+    (``oof_<name>.npy`` / ``.json``) and reused on rerun.
+    """
+    if cache_dir is not None:
+        fp, fj = Path(cache_dir) / f"oof_{name}.npy", Path(cache_dir) / f"oof_{name}.json"
+        if fp.exists() and fj.exists():
+            log(f"  {name}: using cached OOF {fp}")
+            return np.load(fp), json.load(open(fj))
     rng = np.random.default_rng(SEED)
     ds = _dataset(X, y, feat_names)
     oof = np.zeros(len(y), dtype=np.float32)
@@ -139,6 +148,9 @@ def cv_oof(X: np.ndarray, y: np.ndarray, groups_fold: np.ndarray, train_frac: fl
         iters.append(b.best_iteration or MAX_ROUNDS)
         log(f"  {name} fold {k}: train rows {len(tr_idx):,}, best_iter {iters[-1]}")
     del ds
+    if cache_dir is not None:
+        np.save(fp, oof)
+        json.dump(iters, open(fj, "w"))
     return oof, iters
 
 
@@ -146,9 +158,9 @@ def evaluate_decodings(i1, ip, p, ti1, tip, n_s1, eval_s1, missed=None) -> dict:
     """Tune and compare decodings on OOF probs; returns dict of results incl. best threshold."""
     res = {}
     t_raw, tab_raw = tune_threshold(eval_s1, i1, ip, p, ti1, tip, n_s1, o2o=False)
-    res["thr"] = dict(t=t_raw, **tab_raw.loc[tab_raw["f"].idxmax()].to_dict())
+    res["thr"] = tab_raw.loc[tab_raw["f"].idxmax()].to_dict()
     t_o2o, tab = tune_threshold(eval_s1, i1, ip, p, ti1, tip, n_s1, o2o=True)
-    res["o2o_thr"] = dict(t=t_o2o, **tab.loc[tab["f"].idxmax()].to_dict())
+    res["o2o_thr"] = tab.loc[tab["f"].idxmax()].to_dict()
     o2o = one_to_one(i1, ip, p)
     m = expected_f_decode(i1[o2o], p[o2o], n_s1, missed_true=missed)
     res["o2o_expF"] = score_int(eval_s1, i1[o2o][m], ip[o2o][m], ti1, tip, n_s1)
@@ -174,14 +186,14 @@ def run_model(args) -> None:
     i1, ip = tr["i1"].to_numpy(), tr["ip"].to_numpy()
     ti1, tip = true["i1"].to_numpy(), true["ip"].to_numpy()
     fold = fold_of_s1(n_s1)[i1]
-    frac = getattr(args, "train_frac", 0.35)
+    frac = getattr(args, "train_frac", 0.3)
     rng = np.random.default_rng(SEED)
     keep_s1 = rng.random(n_s1) < frac
     all_s1 = np.arange(n_s1)
 
     # ---------------- stage 1 (relational columns are NaN -> unused)
     log("stage 1 CV")
-    oof1, it1 = cv_oof(X, y, fold, frac, i1, "stage1", names)
+    oof1, it1 = cv_oof(X, y, fold, frac, i1, "stage1", names, cache_dir=cache)
     d1 = evaluate_decodings(i1, ip, oof1, ti1, tip, n_s1, all_s1)
     log(f"stage1 OOF decodings: {json.dumps(d1, default=float)}")
     ds = _dataset(X, y, names)
@@ -200,7 +212,7 @@ def run_model(args) -> None:
     # ---------------- stage 2 (relational features from OOF stage-1 probs)
     log("stage 2 CV")
     X[:, nf:] = relational_features(i1, ip, oof1).to_numpy(np.float32)
-    oof2, it2 = cv_oof(X, y, fold, frac, i1, "stage2", names)
+    oof2, it2 = cv_oof(X, y, fold, frac, i1, "stage2", names, cache_dir=cache)
     d2 = evaluate_decodings(i1, ip, oof2, ti1, tip, n_s1, all_s1)
     log(f"stage2 OOF decodings: {json.dumps(d2, default=float)}")
     best_name = max(("o2o_thr", "o2o_expF"), key=lambda k: d2[k]["f"])
